@@ -157,7 +157,7 @@ The platform leans on AWS managed services for infrastructure, data movement, an
 | Amazon SNS | Notifications. Email, SMS, and Slack (via Lambda subscriber) alerts for gate approvals, health score drops, and migration completion. |
 | AWS ECS Fargate | Runs the platform itself. CrewAI agents, Streamlit dashboard, background workers. |
 | Amazon Cognito | Authentication for the dashboard. |
-| AWS CDK | Infrastructure as Code for the entire stack. |
+| Terraform | Infrastructure as Code for the entire stack. |
 | AWS Step Functions | Orchestrates the 5-phase workflow with state machine transitions and human approval wait states. |
 
 
@@ -342,7 +342,7 @@ Based on AWS SCT and DMS support:
 | Shared state | Amazon DynamoDB |
 | Knowledge base | Amazon DynamoDB |
 | Notifications | Amazon SNS |
-| Infrastructure as Code | AWS CDK (Python) |
+| Infrastructure as Code | Terraform (HCL) |
 | Workflow orchestration | AWS Step Functions |
 | Authentication | Amazon Cognito |
 | Object storage | Amazon S3 |
@@ -354,7 +354,7 @@ Based on AWS SCT and DMS support:
 
 ### Phase 1 -- Foundation and Assessment Agent
 
-- Provision AWS infrastructure via CDK: VPC, RDS instances (source and target), DynamoDB tables, S3 bucket, SNS topics.
+- Provision AWS infrastructure via Terraform: VPC, RDS instances (source and target), DynamoDB tables, S3 bucket, SNS topics.
 - Implement engine-specific catalog query modules (Oracle, SQL Server, PostgreSQL, MySQL).
 - Integrate Amazon Bedrock for risk scoring and assessment report generation.
 - Build the assessment agent end-to-end: connect to source, collect metadata, run SCT assessment (heterogeneous only), generate risk report, upload to S3.

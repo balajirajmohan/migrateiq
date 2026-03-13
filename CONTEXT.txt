@@ -1,0 +1,355 @@
+MIGRATEIQ PROJECT CONTEXT
+=========================
+Last updated: March 13, 2026
+Repository: /Users/balajibr/Desktop/repos/MigrateIQ
+
+
+WHAT THIS FILE IS
+-----------------
+This file captures every decision, discussion, and design choice made during
+the initial planning phase of MigrateIQ. If this chat session is lost, hand
+this file to a new assistant to restore full context.
+
+
+WHAT IS MIGRATEIQ
+-----------------
+MigrateIQ is a plug-and-play database migration platform. When a client comes
+with a database migration project (any source engine, any target engine), the
+platform handles the full lifecycle: assess the source, convert the schema,
+migrate the data, validate the results, and cut over to the new database.
+
+It is built on AWS managed services wherever AWS provides a solution, and fills
+the gaps with AI agents where AWS tooling falls short. The AI agents use Amazon
+Bedrock (Claude) as the LLM backend.
+
+This is an AWS-partnered effort. The product is designed to stay within the AWS
+ecosystem.
+
+
+THE PROBLEM IT SOLVES
+---------------------
+Database migrations are high-risk, manual, and expensive.
+- 80%+ of migration projects fail to meet objectives or exceed budgets.
+- 67% experience significant delays (avg 4.7 months over plan).
+- Downtime costs financial services firms ~$95,000/minute.
+- 23% of migrations require full rollback.
+- Post-migration validation is manual and takes hours.
+
+AWS provides DMS (data movement) and SCT (schema conversion), but neither
+assesses risk, monitors intelligently, validates data integrity deeply, makes
+rollback decisions, or learns from past migrations. That intelligence gap is
+what MigrateIQ fills.
+
+
+TWO MIGRATION APPROACHES SUPPORTED
+-----------------------------------
+1. Lift and Shift (Rehost): Same engine on both sides. Move data as-is.
+   Example: MySQL on-prem to MySQL on RDS. Schema does not change.
+   Simpler. Uses native backup/restore or DMS full-load.
+
+2. Replatform (Heterogeneous): Different engines. Schema must be converted.
+   Example: Oracle to Aurora PostgreSQL. Stored procs may need rewriting.
+   Complex. Uses SCT for conversion, DMS for data, AI agent for gaps.
+
+
+FIVE-PHASE MIGRATION LIFECYCLE
+-------------------------------
+Every migration follows these phases in order:
+
+Phase 1 - ASSESS: Connect to source DB, collect metadata via system catalog
+  queries, run SCT assessment (if heterogeneous), use Bedrock to score risk,
+  estimate downtime, identify blockers, recommend strategy. Output: assessment
+  report in S3.
+
+Phase 2 - CONVERT: SCT converts schema automatically. AI agent rewrites what
+  SCT cannot handle (complex stored procs, triggers with business logic).
+  Rollback scripts generated here, before execution. Skipped for lift-and-shift.
+
+Phase 3 - MIGRATE: DMS moves the data (full-load and/or CDC). AI agent monitors
+  DMS task health via CloudWatch, interprets errors, decides continue/pause/abort.
+  DMS does NOT migrate: stored procs, triggers, views, secondary indexes, FKs,
+  defaults, check constraints, sequences, user accounts.
+
+Phase 4 - VALIDATE: Cross-database checks. Row counts, checksums, object counts,
+  constraint status, index status, sequence values, performance baselines,
+  business rule validation (configurable per engagement). Output: compliance
+  report (Excel, PDF) in S3.
+
+Phase 5 - CUTOVER: Stop DMS CDC, verify lag=0, apply secondary objects (FKs,
+  indexes), switch application connection, monitor 30 minutes post-cutover.
+  Auto-rollback if health score drops below threshold.
+
+
+HUMAN APPROVAL GATES
+--------------------
+Three mandatory checkpoints where a human must approve before proceeding:
+- Gate 1: After assessment, before planning. "Do we proceed?"
+- Gate 2: After runbook generation, before execution. "Is the plan acceptable?"
+- Gate 3: After validation, before go-live. "Is the data verified?"
+
+Surfaced through a Streamlit dashboard (deployed on ECS Fargate later).
+
+
+SIX AI AGENTS
+-------------
+1. Assessment Agent: Catalog queries + Bedrock risk scoring. Output: risk report.
+2. Runbook Agent: Generates migration plan + scripts + rollback scripts.
+3. Execution Agent: Runs runbook step-by-step via SSM/DMS SDK. Checks abort signal.
+4. Monitoring Agent: Watches CloudWatch logs/metrics. Classifies events via Bedrock.
+   Calculates health score. Sets abort flag in DynamoDB.
+5. Validation Agent: Cross-DB checks. Generates compliance reports.
+6. Rollback Agent: Executes pre-generated rollback scripts. Logs to knowledge base.
+
+
+AWS SERVICES USED
+-----------------
+- Amazon Bedrock (Claude): LLM backend for all agents.
+- AWS DMS: Data movement (full-load and CDC).
+- AWS SCT: Schema conversion and assessment reports. Free.
+- Amazon RDS / Aurora: Managed databases (source and target).
+- Amazon DynamoDB: Shared state between agents + knowledge base.
+- Amazon S3: Reports, scripts, runbooks, staging data.
+- AWS Systems Manager (SSM): Remote command execution (replaces SSH).
+- Amazon CloudWatch: Logs, metrics, alarms for monitoring.
+- Amazon SNS: Notifications (email, SMS, Slack via Lambda).
+- AWS ECS Fargate: Runs the platform (agents + dashboard).
+- Amazon Cognito: Dashboard authentication.
+- AWS Step Functions: Orchestrates the 5-phase workflow.
+- Terraform: Infrastructure as Code (chosen over CDK).
+
+
+INFRASTRUCTURE AS CODE DECISION
+-------------------------------
+Terraform was chosen over AWS CDK. Reasons:
+- Industry standard. More marketable skill.
+- Multi-cloud capable if needed later.
+- Larger community, more examples online.
+- CDK was considered but rejected since the user wants to learn Terraform
+  as a long-term career investment, despite CDK being faster for AWS-only work.
+
+
+ASSESSMENT WITHOUT FLEET ADVISOR
+--------------------------------
+AWS DMS Fleet Advisor is ending May 2026. It was only a basic inventory scanner
+anyway. Assessment is handled through:
+
+1. Direct catalog queries against system views (every engine supports these):
+   - MySQL: information_schema.tables, columns, statistics, routines, triggers, etc.
+   - PostgreSQL: pg_stat_user_tables, pg_indexes, pg_proc, pg_trigger, etc.
+   - Oracle: DBA_TABLES, DBA_TAB_COLUMNS, DBA_INDEXES, DBA_CONSTRAINTS, etc.
+   - SQL Server: sys.tables, sys.columns, sys.indexes, sys.procedures, etc.
+
+2. AWS SCT assessment report (for heterogeneous migrations).
+
+3. AI agent (Bedrock) takes the raw metadata + SCT report and produces:
+   risk score, downtime estimate, blockers, strategy recommendation.
+
+
+COMPETITIVE LANDSCAPE
+---------------------
+Flyway (Redgate): Schema version control using SQL files. 22+ databases.
+  Dev-time CI/CD tool. No data migration, no cross-engine, no risk assessment,
+  no monitoring, no intelligent rollback. Undo migrations are paid-only and
+  limited (can't recover dropped data).
+
+Liquibase: Database change governance. 60+ databases. Schema versioning +
+  drift detection + compliance (SOX, HIPAA, PCI-DSS). No data migration,
+  no cross-engine conversion, no risk assessment, no monitoring.
+
+Overlap with MigrateIQ: Three areas.
+  1. Schema change application (different intent: iterative dev vs one-time migration)
+  2. Rollback (different scope: individual changeset vs full DB state)
+  3. Audit/compliance (different context: ongoing governance vs migration event proof)
+
+Non-overlap: Flyway/Liquibase are dev-time CI/CD tools. MigrateIQ is an
+  operations-time migration execution platform. A client can use all three.
+
+Other competitors: AWS DMS (data movement only, no intelligence), AWS SCT
+  (schema conversion only), Datafold (dbt/ETL focus), SnowConvert (Snowflake-only),
+  Xebia Agentic Migrator (SQL conversion only, not full lifecycle), Oracle
+  GoldenGate (expensive, Oracle-centric).
+
+
+SUPPORTED MIGRATION PATHS (via AWS SCT/DMS)
+--------------------------------------------
+Oracle (10.1+)      -> Aurora PG, Aurora MySQL, RDS PG, RDS MySQL, RDS Oracle
+SQL Server (2008R2+) -> Aurora PG, Aurora MySQL, Babelfish, RDS PG, RDS SQL Server
+MySQL (5.5+)        -> Aurora PG, RDS PG, Aurora MySQL, RDS MySQL
+PostgreSQL (9.1+)   -> Aurora PG, Aurora MySQL, RDS MySQL
+IBM Db2 LUW         -> Aurora PG, Aurora MySQL, RDS PG, RDS MySQL
+SAP ASE             -> Aurora PG, Aurora MySQL, RDS PG
+MongoDB             -> DocumentDB, DynamoDB
+
+
+TECHNOLOGY STACK
+----------------
+Application language: Python (user is new to Python, code must be simple,
+  small files, clear naming, well-explained patterns)
+Multi-agent framework: CrewAI
+LLM backend: Amazon Bedrock (Claude)
+DB connectivity: pymysql (MySQL), psycopg2 (PostgreSQL), python-oracledb, pyodbc
+Remote execution: AWS SSM Run Command
+Log monitoring: CloudWatch Logs + Alarms
+Dashboard: Streamlit on ECS Fargate
+Reports: OpenPyXL (Excel), ReportLab (PDF)
+Script templating: Jinja2
+Shared state: DynamoDB
+Knowledge base: DynamoDB
+Notifications: SNS
+Infrastructure: Terraform (HCL)
+Workflow orchestration: Step Functions
+Auth: Cognito
+Storage: S3
+Runtime: ECS Fargate
+Testing: pytest
+
+
+FIRST MIGRATION PATH FOR POC
+-----------------------------
+MySQL to Aurora PostgreSQL. Chosen because:
+- Free and cheap to run on AWS (free tier eligible for RDS MySQL, Aurora Serverless
+  v2 at minimum ACU for PostgreSQL).
+- Still a heterogeneous migration, which exercises the full pipeline including
+  schema conversion.
+- Easy to set up, no license requirements (unlike Oracle).
+
+
+CURRENT STATE OF THE REPOSITORY
+--------------------------------
+Path: /Users/balajibr/Desktop/repos/MigrateIQ
+
+Contains leftover Node.js files from a YouTube tutorial (Sequelize, Express,
+docker-compose) that need to be removed. The useful files to keep:
+- README.md (comprehensive product plan, competitive analysis, tech stack)
+- MIGRATEIQ_CONTEXT.md (original brainstorm from Claude, Oracle-specific,
+  now superseded by README.md for the generic product vision)
+- CONTEXT.txt (this file)
+- LICENSE
+- .git (preserve git history)
+
+Everything else (app/, db/, client, docker-compose.yml, Dockerfile.app,
+package.json, package-lock.json, node .gitignore) will be replaced with
+Python project structure.
+
+
+DEVELOPMENT PLAN (APPROVED, READY TO EXECUTE)
+----------------------------------------------
+Plan file: .cursor/plans/migrateiq_development_kickoff_259027e4.plan.md
+
+Step 0 - Environment Setup:
+  - Install and configure AWS CLI v2 (user has account, CLI not configured yet)
+  - Install Python 3.11+, create virtualenv
+  - Install Terraform CLI
+  - Verify: aws sts get-caller-identity, python3 --version, terraform --version
+
+Step 1 - Clean Up and Scaffold:
+  - Remove old Node.js files
+  - Replace .gitignore with Python version
+  - Create project structure:
+    infra/ (Terraform: main.tf, variables.tf, outputs.tf, modules/)
+    src/ (config.py, db/, agents/, services/, templates/)
+    seed/ (seed_data.sql)
+    tests/
+  - Create requirements.txt, .env.example
+
+Step 2 - Terraform Infrastructure:
+  - modules/networking: VPC, subnets (2 AZs), security groups
+  - modules/databases: RDS MySQL 8.0 (db.t3.micro), Aurora PG 15 Serverless v2
+  - modules/storage: DynamoDB (migration_state, knowledge_base), S3, SNS
+  - terraform init, plan, apply
+  - terraform destroy when not in use to save cost
+  - Estimated cost: $2-4/day with free tier
+
+Step 3 - Seed Source Database:
+  - Banking schema on MySQL: customers (10K), accounts (15K), transactions (100K),
+    loans (5K), stored procedure, view, trigger, indexes, constraints
+
+Step 4 - Build Assessment Agent:
+  - src/db/catalog_queries/mysql.py: information_schema queries
+  - src/services/bedrock_client.py: boto3 Bedrock wrapper
+  - src/agents/assessment_agent.py: orchestrator
+  - src/templates/assessment_report.md.j2: Jinja2 report template
+  - Flow: connect -> query catalog -> send to Bedrock -> render report ->
+    upload S3 -> write DynamoDB -> send SNS -> print summary
+
+Step 5 - Verify End-to-End:
+  - Run assessment agent against seeded MySQL
+  - Confirm: report in S3, record in DynamoDB, SNS notification sent
+
+After that (not yet planned in detail):
+  - Streamlit dashboard with Gate 1
+  - SCT integration
+  - Runbook Agent
+  - DMS integration
+  - Execution + Monitoring agents
+  - Validation Agent
+  - Rollback Agent
+
+
+KEY DESIGN PRINCIPLES
+---------------------
+1. AWS services wherever possible, custom code only where AWS has gaps.
+2. Plug-and-play: any source engine, any target engine, same platform.
+3. Human-in-the-loop: 3 approval gates, never fully autonomous.
+4. Knowledge base: learns from every migration, improves over time.
+5. Rollback scripts generated before execution, not improvised during failure.
+6. Small Python files, single-purpose modules, beginner-friendly code.
+7. Terraform for IaC (not CDK).
+8. Assessment relies on direct catalog queries + SCT + AI, not Fleet Advisor.
+
+STRICT: SEPARATION OF CONCERNS
+9. Infrastructure code (Terraform) and application code (Python) must live
+   in completely separate directory trees. infra/ is Terraform only. src/ is
+   Python only. No mixing. No Terraform files inside src/. No Python app
+   logic inside infra/. They communicate only through configuration values
+   (Terraform outputs -> .env or parameter store -> Python config reads them).
+
+STRICT: SECURITY BEST PRACTICES
+10. No secrets in code. Ever. No hardcoded passwords, API keys, connection
+    strings, or tokens in any file that gets committed. Secrets go into:
+    - .env (gitignored, local development only)
+    - AWS Secrets Manager (for production/deployed environments)
+    - terraform.tfvars (gitignored, Terraform variables only)
+    Only .env.example and terraform.tfvars.example are committed, with
+    placeholder values showing the expected format.
+11. Least privilege IAM. Every AWS service gets the minimum permissions it
+    needs, nothing more. No wildcard (*) policies unless absolutely required
+    for POC and explicitly called out as tech debt.
+12. No public database access in production. RDS/Aurora publicly accessible
+    only during local POC development. Production uses private subnets +
+    bastion host or VPN. Terraform should have a variable to toggle this.
+13. Security groups follow deny-by-default. Only open the specific ports
+    needed (3306 for MySQL, 5432 for PostgreSQL, 443 for HTTPS) to the
+    specific sources that need them (your IP for dev, app security group
+    for production).
+14. Encryption at rest enabled for all data stores (RDS, Aurora, DynamoDB,
+    S3). Encryption in transit (TLS/SSL) for all database connections and
+    API calls. These are non-negotiable.
+15. S3 buckets: block all public access, enable versioning, enable server-
+    side encryption (SSE-S3 or SSE-KMS).
+16. DynamoDB: encryption at rest enabled by default. Point-in-time recovery
+    enabled for knowledge base table.
+17. SNS: no sensitive data in notification payloads. Notifications say
+    "Assessment complete for migration X" not "Assessment complete for
+    database at 10.0.1.5 with password abc123".
+18. Terraform state: stored in S3 backend with state locking via DynamoDB.
+    Never committed to git. terraform.tfstate is gitignored.
+19. Dependencies pinned. requirements.txt pins exact versions. No unpinned
+    packages that could introduce supply chain vulnerabilities.
+
+
+REFERENCE FILES
+---------------
+README.md - Full product plan, competitive analysis, migration lifecycle,
+  AWS service mapping, tech stack, build phases. This is the primary
+  reference document.
+
+MIGRATEIQ_CONTEXT.md - Original brainstorm from Claude. Oracle-specific,
+  6 agents with CrewAI, Docker Oracle containers, banking schema seed data.
+  Still useful as reference for agent design patterns and Oracle query
+  examples, but the product vision has evolved to be engine-agnostic.
+  README.md supersedes this for the current direction.
+
+.cursor/plans/migrateiq_development_kickoff_259027e4.plan.md - Detailed
+  development plan with todos. Step-by-step instructions for building the
+  first working deliverable (Assessment Agent).
