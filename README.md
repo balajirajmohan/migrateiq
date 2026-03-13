@@ -206,14 +206,108 @@ Over time, the assessment agent uses this history to improve its risk prediction
 
 ## Competitive Landscape
 
-| Product | Focus | Limitation |
+### Flyway (by Redgate)
+
+Flyway is a schema version control tool. It tracks database schema changes using versioned SQL files (V1__create_users.sql, V2__add_email_column.sql) and maintains a schema history table in the database to record what has been applied. It supports 22+ databases including PostgreSQL, Oracle, SQL Server, MySQL, MariaDB, MongoDB (preview), Snowflake, and others.
+
+What Flyway does well:
+
+- Versioned, repeatable schema migrations using plain SQL files with naming conventions
+- Schema history table as an audit trail of every migration applied
+- Undo migrations (paid Teams tier only) that reverse specific versioned migrations
+- Schema diff and drift detection through Flyway Desktop GUI
+- CI/CD integration via Maven, Gradle, CLI, and Java API
+- DDL transaction support for safe rollback on failure (PostgreSQL, SQL Server, DB2, Derby, EnterpriseDB only)
+
+What Flyway does not do:
+
+- No data migration. Flyway changes the schema structure. It does not move rows between databases.
+- No cross-engine migration. Flyway works within a single database engine. It cannot convert Oracle schema to PostgreSQL.
+- No risk assessment. There is no analysis of whether a migration is safe to run or what could go wrong.
+- No live monitoring during migration execution.
+- No intelligent rollback. Undo migrations assume the original migration fully succeeded. On databases without DDL transactions, a partially failed migration cannot be cleanly undone.
+- No post-migration validation beyond confirming the SQL ran successfully.
+- No stored procedure or trigger conversion.
+- Undo migrations cannot recover dropped tables, deleted data, or truncated columns. Flyway documentation explicitly states this is not a substitute for backups.
+
+### Liquibase (by Liquibase Inc.)
+
+Liquibase is a database change governance platform. The open-source community edition handles schema versioning similar to Flyway but with broader format support (XML, YAML, JSON, SQL changelogs). The commercial Liquibase Secure product adds governance, drift detection, audit trails, and compliance controls. It supports 60+ databases including PostgreSQL, Oracle, SQL Server, MySQL, Snowflake, Databricks, BigQuery, MongoDB, and DB2 for z/OS.
+
+What Liquibase does well:
+
+- Multi-format change definitions (SQL, XML, YAML, JSON) with a database-agnostic abstraction layer
+- Built-in rollback support in the free tier, with auto-generated rollback SQL for many common operations
+- Drift detection that compares a database's current state against its expected state and flags out-of-process changes
+- Tamper-evident audit trails logging every change with user identity, target environment, timestamp, and metadata
+- Policy checks that validate schema rules and block non-compliant changes before deployment
+- Compliance framework support (SOX, HIPAA, PCI-DSS, GDPR, DORA) through structured observability reports
+- Conditional deployment logic and master changelog orchestration for complex environments
+- Separation of duties enforcement and role-based access control in CI/CD pipelines
+
+What Liquibase does not do:
+
+- No data migration. Like Flyway, Liquibase manages schema structure changes. It does not move data between databases.
+- No cross-engine migration. It does not convert schema from one database engine to another.
+- No risk assessment or downtime estimation before applying changes.
+- No live monitoring during execution beyond success/failure of individual changesets.
+- No stored procedure or trigger conversion between engines.
+- No intelligent decision-making. It enforces rules that humans define, but it does not analyze a database and recommend what to do.
+
+### Flyway and Liquibase vs MigrateIQ -- Overlap Analysis
+
+The three products operate in adjacent but fundamentally different spaces. The following table maps specific capabilities across all three.
+
+| Capability | Flyway | Liquibase | MigrateIQ |
+|---|---|---|---|
+| Schema version tracking | Yes, via history table and versioned SQL files | Yes, via changelog and DATABASECHANGELOGHISTORY table | No. MigrateIQ does not version-control incremental schema changes during development. |
+| Incremental schema changes (add column, alter table) | Yes, core function | Yes, core function | No. MigrateIQ handles one-time full-schema migration, not iterative dev-cycle changes. |
+| Rollback of schema changes | Undo migrations (paid tier, limited) | Built-in rollback with auto-generated SQL (free tier) | Full rollback to pre-migration state using database-native tools (RMAN, pg_basebackup, native backup/restore). |
+| Drift detection | Flyway Desktop only | Built-in, with risk scoring | Not applicable. MigrateIQ operates during migration events, not as a continuous governance layer. |
+| Audit trail | Schema history table | Tamper-evident logs with compliance framework support | Migration execution log with every step, decision, and outcome stored in DynamoDB. |
+| Compliance reporting | None | SOX, HIPAA, PCI-DSS, GDPR, DORA reports | Post-migration compliance report (Excel, PDF) covering data integrity validation results. |
+| CI/CD integration | Maven, Gradle, CLI, Java API | CLI, CI/CD pipeline embedding, policy gates | Not a CI/CD tool. Operates as a standalone migration execution platform. |
+| Database support | 22+ databases | 60+ databases | All databases supported by AWS DMS and SCT (Oracle, SQL Server, PostgreSQL, MySQL, MariaDB, Db2, SAP ASE, MongoDB). |
+| Cross-engine schema conversion | No | No | Yes, via AWS SCT and AI agent for complex conversions. |
+| Data migration (moving rows) | No | No | Yes, via AWS DMS (full load and CDC). Core function. |
+| Risk assessment | No | No | Yes. AI agent analyzes source DB metadata and scores risk before migration begins. |
+| Downtime estimation | No | No | Yes. AI agent estimates downtime based on data volume, complexity, and historical data. |
+| Runbook generation | No | No | Yes. AI agent generates ordered migration plan with scripts, timelines, and rollback procedures. |
+| Live monitoring with intelligence | No | No | Yes. AI agent watches logs and metrics during execution, classifies events, calculates health score, and can abort. |
+| Post-migration validation (checksums, row counts, business rules) | No | No | Yes. AI agent runs deep cross-database validation suite. |
+| Automatic rollback based on health | No | No | Yes. Monitoring agent triggers rollback agent when health score drops below threshold. |
+| Stored procedure conversion | No | No | Yes, via SCT and AI agent for complex cases. |
+| Human approval gates | No | Policy gates in CI/CD (rule-based, not approval-based) | Yes. Three mandatory human approval checkpoints before plan, execution, and go-live. |
+| Knowledge base (learns from past migrations) | No | No | Yes. Every migration outcome stored and used to improve future risk predictions. |
+
+### Where They Overlap
+
+There are three areas where the products share common ground.
+
+First, schema change tracking. Flyway and Liquibase track individual schema changes over time (V1, V2, V3...). MigrateIQ generates and applies a full schema in a single operation during migration. The intent is different (iterative development vs one-time migration), but the underlying action of applying DDL to a database is the same. If a client already uses Flyway or Liquibase in their development workflow, MigrateIQ should not replace that. MigrateIQ handles the production migration event; Flyway/Liquibase handle the ongoing development lifecycle before and after.
+
+Second, rollback. All three products support some form of rollback. Flyway offers undo migrations with known limitations (paid tier, assumes full success, cannot recover dropped data). Liquibase offers auto-generated rollback SQL for supported operations. MigrateIQ uses database-native backup and restore (RMAN, pg_basebackup, native snapshots) for full-state rollback, which is more comprehensive but heavier. The approaches are complementary. Flyway/Liquibase roll back individual changesets. MigrateIQ rolls back an entire migration to a known-good state.
+
+Third, audit and compliance. Liquibase Secure has strong compliance features (SOX, HIPAA, PCI-DSS audit trails, drift detection, policy enforcement). MigrateIQ generates compliance reports specifically for migration events (data integrity proof, validation results). For a client in a regulated industry, Liquibase Secure governs day-to-day database changes, and MigrateIQ provides the compliance artifact for the migration event itself. These are complementary, not competitive.
+
+### Where They Do Not Overlap
+
+The core value propositions are entirely different. Flyway and Liquibase are development-time tools that manage schema evolution across environments (dev, staging, production) as part of a CI/CD pipeline. MigrateIQ is an operations-time tool that handles the one-time event of moving a database from one platform to another.
+
+Flyway and Liquibase do not move data, do not work across database engines, do not assess risk, do not monitor execution, do not validate data integrity post-migration, and do not make rollback decisions autonomously. MigrateIQ does not track incremental schema changes, does not integrate into CI/CD pipelines, does not enforce developer governance policies, and does not detect schema drift over time.
+
+A client could reasonably use all three: Liquibase for day-to-day schema governance, Flyway for lightweight schema versioning in development, and MigrateIQ for the production migration event.
+
+### Other Competitors
+
+| Product | Focus | How It Differs from MigrateIQ |
 |---|---|---|
-| AWS DMS | Data movement between databases | No intelligence layer. Moves data, logs errors, and stops there. Does not assess, monitor intelligently, validate deeply, or roll back. |
+| AWS DMS | Data movement between databases | Moves data and logs errors. No intelligence layer, no assessment, no monitoring decisions, no validation beyond basic row counts. |
 | AWS SCT | Schema conversion | Generates conversion reports and DDL. Does not execute migrations, monitor health, or validate post-migration. |
-| Flyway / Liquibase | Schema version control for development workflows | CI/CD tools for developers, not production migration platforms. |
-| Datafold Migration Agent | AI for data pipeline migration | Focused on dbt and ETL pipeline translation, not live database-to-database migration. |
-| SnowConvert AI | Snowflake-specific migration | Locked to Snowflake as the target. Not multi-target. |
-| Xebia Agentic Migrator | Multi-agent SQL translation across platforms | Handles SQL conversion only. Does not cover the full lifecycle from assessment through cutover and rollback. |
+| Datafold Migration Agent | AI for data pipeline migration (dbt focus) | Translates ETL pipelines and stored procedures to dbt models. Does not handle live database-to-database migration or data movement. |
+| SnowConvert AI | Snowflake-specific migration | Converts Oracle, SQL Server, Teradata, and others to Snowflake. Locked to Snowflake as the only target. Not multi-target. |
+| Xebia Agentic Migrator | Multi-agent SQL translation across platforms | Handles SQL and ETL conversion across 7 platforms. Does not cover the full lifecycle from assessment through cutover and rollback. |
+| Oracle GoldenGate | Real-time data replication | Enterprise-grade replication for Oracle-to-any scenarios. Expensive, Oracle-centric, no AI intelligence layer. |
 
 The gap this product fills: a full-lifecycle, multi-database, AWS-native migration platform where AI agents orchestrate AWS services end-to-end, with human approval gates at each critical decision point.
 
