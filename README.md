@@ -2,6 +2,17 @@
 
 A plug-and-play database migration platform built on AWS managed services, with AI agents handling the gaps that AWS tooling cannot cover. The goal is to have a reusable product that works for any database migration engagement, regardless of source engine, target engine, or migration approach.
 
+
+## Architecture
+
+![MigrateIQ Architecture](docs/images/architecture_diagram.png)
+
+
+## Migration Lifecycle
+
+![MigrateIQ 5-Phase Migration Lifecycle](docs/images/migration_lifecycle.png)
+
+
 ## Problem Statement
 
 Database migrations remain one of the highest-risk operations in enterprise IT. The industry data is clear:
