@@ -1,0 +1,16 @@
+aws_region  = "us-east-1"
+aws_profile = "presidio-devops"
+environment = "dev"
+
+vpc_cidr    = "10.0.0.0/16"
+allowed_ip  = "YOUR_PUBLIC_IP/32"   # Replace with your IP. Find it: curl ifconfig.me
+
+mysql_db_name  = "migrateiq_source"
+mysql_username = "migrateiq_admin"
+mysql_password = "REPLACE_WITH_STRONG_PASSWORD"
+
+aurora_db_name  = "migrateiq_target"
+aurora_username = "migrateiq_admin"
+aurora_password = "REPLACE_WITH_STRONG_PASSWORD"
+
+publicly_accessible = true   # ONLY for local dev. Set false for anything else.

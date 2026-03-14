@@ -204,6 +204,16 @@ Runtime: ECS Fargate
 Testing: pytest
 
 
+AWS ACCOUNT DETAILS
+-------------------
+Account ID: 853973692277
+Region: us-east-1
+AWS CLI profile name: presidio-devops
+Auth method: SSO (AWSReservedSSO_limited-admin)
+All AWS CLI and Terraform commands must use --profile presidio-devops or have
+AWS_PROFILE=presidio-devops set in the environment.
+
+
 FIRST MIGRATION PATH FOR POC
 -----------------------------
 MySQL to Aurora PostgreSQL. Chosen because:
@@ -336,6 +346,19 @@ STRICT: SECURITY BEST PRACTICES
     Never committed to git. terraform.tfstate is gitignored.
 19. Dependencies pinned. requirements.txt pins exact versions. No unpinned
     packages that could introduce supply chain vulnerabilities.
+
+COST ESTIMATION (INFRACOST)
+20. Infracost CLI is used for infrastructure cost visibility. Install via
+    brew install infracost, then infracost auth login for API key.
+21. infra/infracost-usage.yml defines expected usage for variable-cost
+    resources (DynamoDB requests, S3 storage, SNS messages). Without this,
+    Infracost only estimates fixed costs.
+22. src/services/cost_estimator.py wraps the Infracost CLI for programmatic
+    use by the Assessment Agent. It runs infracost breakdown against
+    Terraform directories and returns structured cost estimates.
+23. Two use cases: (a) developer tooling to see what the platform costs
+    before deploying, (b) product feature to estimate target infrastructure
+    cost for clients as part of the assessment report.
 
 
 REFERENCE FILES

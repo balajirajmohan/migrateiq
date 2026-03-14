@@ -327,6 +327,35 @@ Based on AWS SCT and DMS support:
 | MongoDB | Amazon DocumentDB, DynamoDB |
 
 
+## Cost Estimation
+
+Infrastructure cost visibility is built into the platform at two levels.
+
+### Developer Tooling
+
+Infracost CLI runs against the Terraform modules in infra/ to produce a cost breakdown before any resources are provisioned. This prevents billing surprises during development and provides a cost baseline that can be tracked over time.
+
+The usage file at infra/infracost-usage.yml defines expected monthly consumption for variable-cost resources (DynamoDB read/write request units, S3 storage and request tiers, SNS message volume, Aurora Serverless ACU estimates). Without this file, Infracost can only estimate fixed costs like RDS instance hours. With it, the estimate covers the full picture.
+
+Running a cost estimate locally:
+
+    infracost breakdown --path infra/ --usage-file infra/infracost-usage.yml
+
+Running a cost diff after making infrastructure changes:
+
+    infracost breakdown --path infra/ --format json --out-file baseline.json
+    # make changes to .tf files
+    infracost diff --path infra/ --compare-to baseline.json
+
+### Product Feature
+
+The Assessment Agent includes a cost estimation step as part of the migration assessment report. When evaluating a migration, the agent calls Infracost programmatically (via src/services/cost_estimator.py) to estimate the monthly and annual cost of the target infrastructure. This gives Gate 1 reviewers not just a risk score and downtime estimate, but a dollar figure for the target environment.
+
+The cost estimation service wraps the Infracost CLI and returns a structured result containing the total monthly cost, total annual cost, a per-resource breakdown sorted by cost, and a human-readable summary suitable for inclusion in reports.
+
+For client engagements, this turns the assessment from a purely technical document into a business case. Decision-makers can compare current infrastructure costs (Oracle licensing, on-premises hardware) against the projected AWS cost and make an informed go/no-go decision at Gate 1.
+
+
 ## Technology Stack
 
 | Layer | Technology |
@@ -339,6 +368,7 @@ Based on AWS SCT and DMS support:
 | Dashboard | Streamlit on ECS Fargate |
 | Report generation | OpenPyXL (Excel), ReportLab (PDF) |
 | Script templating | Jinja2 |
+| Cost estimation | Infracost CLI + infracost-usage.yml |
 | Shared state | Amazon DynamoDB |
 | Knowledge base | Amazon DynamoDB |
 | Notifications | Amazon SNS |
@@ -350,14 +380,95 @@ Based on AWS SCT and DMS support:
 | Testing | pytest |
 
 
+## Project Structure
+
+The project enforces strict separation between infrastructure code and application code. Terraform and Python never share a directory.
+
+    MigrateIQ/
+    |
+    |-- infra/                          Terraform only. No Python.
+    |   |-- main.tf                     Root module, provider, backend, module calls
+    |   |-- variables.tf                Input variables
+    |   |-- outputs.tf                  Output values (DB endpoints, bucket names)
+    |   |-- terraform.tfvars.example    Example variable values (no secrets)
+    |   |-- infracost-usage.yml         Usage estimates for cost breakdown
+    |   |-- modules/
+    |       |-- networking/
+    |       |   |-- main.tf             Locals and data sources
+    |       |   |-- vpc.tf              VPC, internet gateway, default SG deny-all
+    |       |   |-- subnets.tf          Public and private subnets, route tables
+    |       |   |-- security_groups.tf  Individual SG rules per port and source
+    |       |   |-- variables.tf        Validated inputs (CIDR, environment)
+    |       |   |-- outputs.tf
+    |       |-- databases/
+    |       |   |-- main.tf             Locals, subnet group
+    |       |   |-- mysql.tf            RDS MySQL source, parameter group
+    |       |   |-- aurora.tf           Aurora PG target, cluster parameter group
+    |       |   |-- variables.tf        Validated inputs (password length, DB names)
+    |       |   |-- outputs.tf
+    |       |-- storage/
+    |           |-- main.tf             Locals
+    |           |-- s3.tf               Bucket, versioning, encryption, SSL-only policy, lifecycle
+    |           |-- dynamodb.tf         State table, knowledge base table with PITR and TTL
+    |           |-- sns.tf              Alert topic, optional email subscription
+    |           |-- variables.tf
+    |           |-- outputs.tf
+    |
+    |-- src/                            Python only. No Terraform.
+    |   |-- config.py                   Loads .env, defines Settings dataclass
+    |   |-- db/
+    |   |   |-- connection.py           DB connection factory
+    |   |   |-- catalog_queries/
+    |   |       |-- mysql.py            information_schema queries
+    |   |       |-- postgresql.py       pg_catalog queries
+    |   |-- agents/
+    |   |   |-- assessment_agent.py     Phase 1 agent
+    |   |-- services/
+    |   |   |-- bedrock_client.py       Bedrock wrapper
+    |   |   |-- s3_client.py            Report upload/download
+    |   |   |-- sns_client.py           Notifications
+    |   |   |-- dynamodb_client.py      State and knowledge base
+    |   |   |-- cost_estimator.py       Infracost CLI wrapper
+    |   |-- templates/
+    |       |-- assessment_report.md.j2 Jinja2 report template
+    |
+    |-- seed/
+    |   |-- seed_data.sql               Banking schema and test data
+    |
+    |-- tests/
+    |   |-- test_connection.py
+    |   |-- test_assessment.py
+    |
+    |-- requirements.txt                Pinned dependency versions
+    |-- .env.example                    Placeholder environment variables
+    |-- .gitignore                      Blocks .env, tfvars, tfstate, __pycache__
+
+
+## Security Practices
+
+All secrets (database passwords, API keys, connection strings) are stored in .env (local development, gitignored) or AWS Secrets Manager (deployed environments). Only .env.example and terraform.tfvars.example are committed, containing placeholder values.
+
+Terraform state is stored in an S3 backend with DynamoDB state locking, never in the repository. The terraform.tfstate file is gitignored.
+
+All RDS and Aurora instances have storage encryption enabled. All database connections use SSL/TLS. The S3 bucket blocks all public access, enables versioning, enforces server-side encryption, and has a bucket policy that denies any request not using HTTPS. DynamoDB tables have encryption at rest enabled, and the knowledge base table has point-in-time recovery enabled.
+
+Security groups follow a deny-by-default model. The VPC default security group is overridden to deny all traffic. Database security groups open only MySQL (3306) and PostgreSQL (5432) ports, restricted to a specific developer IP and the VPC CIDR. Each rule is defined as a separate Terraform resource for auditability.
+
+The publicly_accessible flag on RDS instances is controlled by a Terraform variable that defaults to false. It is set to true only during local POC development and is explicitly documented as technical debt to be removed before production use.
+
+IAM follows least privilege. Password variables require a minimum of 12 characters, enforced by Terraform validation blocks. All Python dependencies in requirements.txt are pinned to exact versions.
+
+
 ## Build Plan
 
 ### Phase 1 -- Foundation and Assessment Agent
 
-- Provision AWS infrastructure via Terraform: VPC, RDS instances (source and target), DynamoDB tables, S3 bucket, SNS topics.
-- Implement engine-specific catalog query modules (Oracle, SQL Server, PostgreSQL, MySQL).
+- Provision AWS infrastructure via Terraform: VPC, RDS MySQL source, Aurora PostgreSQL target, DynamoDB tables, S3 bucket, SNS topics.
+- Seed the MySQL source with a banking schema (customers, accounts, transactions, loans, stored procedures, views, triggers).
+- Implement the MySQL catalog query module against information_schema.
 - Integrate Amazon Bedrock for risk scoring and assessment report generation.
-- Build the assessment agent end-to-end: connect to source, collect metadata, run SCT assessment (heterogeneous only), generate risk report, upload to S3.
+- Integrate Infracost for target infrastructure cost estimation.
+- Build the assessment agent end-to-end: connect to source, collect metadata, score risk, estimate cost, generate report, upload to S3.
 - Build the Streamlit dashboard with Gate 1 approval screen.
 
 ### Phase 2 -- Conversion and Planning

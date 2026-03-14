@@ -1,0 +1,56 @@
+version: 0.1
+
+resource_type_default_usage:
+  aws_dynamodb_table:
+    monthly_read_request_units: 10000
+    monthly_write_request_units: 5000
+    storage_gb: 1
+
+  aws_s3_bucket:
+    object_tags: 0
+    standard:
+      storage_gb: 5
+      monthly_tier_1_requests: 1000
+      monthly_tier_2_requests: 5000
+      monthly_select_data_scanned_gb: 0
+      monthly_select_data_returned_gb: 0
+
+  aws_sns_topic:
+    monthly_requests: 1000
+
+resource_usage:
+  # RDS MySQL source -- fixed cost from instance class,
+  # storage billed on allocated GB
+  aws_db_instance.mysql_source:
+    storage_gb: 20
+    monthly_additional_backup_storage_gb: 0
+
+  # Aurora PostgreSQL target -- Serverless v2 billed per ACU-hour.
+  # Estimate assumes average 0.5 ACU sustained (minimum).
+  module.databases.aws_rds_cluster.aurora_target:
+    storage_gb: 20
+    write_requests_per_sec: 10
+    read_requests_per_sec: 50
+
+  # DynamoDB -- migration state table (low traffic during development)
+  module.storage.aws_dynamodb_table.migration_state:
+    monthly_read_request_units: 5000
+    monthly_write_request_units: 2000
+    storage_gb: 0.5
+
+  # DynamoDB -- knowledge base (grows over time, low traffic)
+  module.storage.aws_dynamodb_table.knowledge_base:
+    monthly_read_request_units: 2000
+    monthly_write_request_units: 500
+    storage_gb: 0.5
+
+  # S3 -- reports bucket (small files, infrequent access)
+  module.storage.aws_s3_bucket.reports:
+    standard:
+      storage_gb: 1
+      monthly_tier_1_requests: 500
+      monthly_tier_2_requests: 2000
+
+  # SNS -- migration alerts (low volume)
+  module.storage.aws_sns_topic.alerts:
+    monthly_requests: 500
