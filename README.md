@@ -1,29 +1,41 @@
 # MigrateIQ
 
-A plug-and-play database migration platform built on AWS managed services, with AI agents handling the gaps that AWS tooling cannot cover. The goal is to have a reusable product that works for any database migration engagement, regardless of source engine, target engine, or migration approach.
+MigrateIQ is an **agentic database migration platform** that orchestrates AWS managed services (and/or native database tooling) end-to-end, while AI agents handle the gaps that point tools don’t cover: **risk assessment, runbook + script generation, live monitoring/decisioning, deep validation, and rollback**.
 
+It is designed to be reusable across migration engagements (source engine, target engine, and migration approach), and it includes **3 human approval gates** for controlled execution.
+
+## Why MigrateIQ exists
+
+Database migrations are high-risk operational events. The tools exist (AWS DMS, SCT, native backup/restore), but teams still struggle with:
+
+- inconsistent discovery and risk scoring
+- runbooks that miss steps or lack rollback detail
+- reactive monitoring during the migration window
+- shallow validation (row counts only) that doesn’t satisfy auditors
+
+MigrateIQ adds the **intelligence + orchestration layer** so migrations are repeatable, auditable, and safer.
 
 ## Architecture
 
 ![MigrateIQ Architecture](docs/images/architecture_diagram.png)
 
-
-## Migration Lifecycle
+## Migration lifecycle (5 phases)
 
 ![MigrateIQ 5-Phase Migration Lifecycle](docs/images/migration_lifecycle.png)
 
+## Real-world use case (SOW-style, short)
 
-## Problem Statement
+**Example engagement**: migrate a portfolio of enterprise databases (mix of non-prod and prod) to a new target platform with strict downtime windows and audit requirements.
 
-Database migrations remain one of the highest-risk operations in enterprise IT. The industry data is clear:
+- **scope**: multiple databases prioritized and migrated in waves; prod cutovers executed in controlled windows
+- **key deliverables**: per-DB assessment report (risk + downtime + blockers), per-DB runbook + scripts + rollback scripts, execution logs + health timeline, validation/compliance report (Excel/PDF), cutover summary
+- **acceptance**: data integrity checks pass, downtime stays within the agreed window, and rollback is executable and tested in non-prod
 
-- Over 80% of migration projects fail to meet objectives or exceed budgets and timelines.
-- 67% of enterprise migrations experience significant delays, averaging 4.7 months longer than planned.
-- Downtime during migration can cost financial services firms upwards of $95,000 per minute.
-- 23% of migrations end up requiring a full rollback.
-- Post-migration validation is a manual, error-prone process that takes hours.
+For a longer copy/paste Confluence page, see `docs/confluence/MigrateIQ_SOW_Case_Study.md`.
 
-The tooling exists (AWS DMS, SCT, native backup/restore), but the intelligence layer does not. Nobody is orchestrating these tools end-to-end, assessing risk before execution, monitoring in real time, or making rollback decisions autonomously.
+## Problem statement (why point tools aren’t enough)
+
+The tooling exists (AWS DMS, SCT, native backup/restore), but the intelligence layer does not. Nobody is orchestrating these tools end-to-end, assessing risk before execution, monitoring in real time, or making rollback decisions with a consistent, auditable process.
 
 
 ## Two Migration Approaches
